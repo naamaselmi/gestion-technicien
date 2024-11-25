@@ -40,6 +40,8 @@ public:
             }
 
             technicien findById(int id);
+            technicien findByName(const QString& name);
+            technicien findByCompetence(const QString& competence);
             bool mettreAJour(int newId);
             void setNom (QString n){nom=n;}
             void setPrenom (QString p){prenom=p;}
@@ -52,6 +54,7 @@ public:
             bool ajouter();
             bool supprimer (int);
             bool convertirEnPDF(const QString &filePath) const;
+            bool convertirEnPDFAbsents(const QString &filePath, const QList<technicien> &techniciensAbsents);
 
             QSqlQueryModel * afficher ();
             QSqlQueryModel* trier(const QString& critere, const QString& ordre);

@@ -25,7 +25,7 @@ MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow)
 {
-    setWindowIcon(QIcon("C:/NAARACH/Atelier_Connexion (1)/Atelier_Connexion/AUTACARE.png"));
+    setWindowIcon(QIcon("C:/Users/selmi/Atelier_Connexion (1)/AUTACARE.png"));
     ui->setupUi(this);
     ui->tableView->setModel(tech.afficher());
 
@@ -424,7 +424,10 @@ void MainWindow::on_statistique_clicked() {
             pieChartPainter.setBrush(color);
             pieChartPainter.drawPie(pieRect, startAngle * 16, spanAngle * 16);  // Dessiner chaque secteur
 
-            // Ajouter le nom de la compétence sur la partie correspondante
+            // Calculer le pourcentage et afficher sur le graphique
+            int percentage = (item.second * 100) / total;
+            QString percentageText = QString("%1%").arg(percentage);
+
             // Calculer la position pour le texte
             int midAngle = startAngle + spanAngle / 2;
             QPointF textPosition = pieRect.center();
@@ -432,7 +435,7 @@ void MainWindow::on_statistique_clicked() {
             textPosition.setY(textPosition.y() + 150 * qSin(midAngle * M_PI / 180));
 
             pieChartPainter.setPen(Qt::black);
-            pieChartPainter.drawText(textPosition, item.first);  // Dessiner le nom de la compétence
+            pieChartPainter.drawText(textPosition, percentageText);  // Dessiner le pourcentage
 
             startAngle += spanAngle;
             colorIndex++;
@@ -485,8 +488,14 @@ void MainWindow::on_statistique_clicked() {
             barChartPainter.setBrush(barColor);
             barChartPainter.drawRect(barRect);  // Dessiner chaque barre
 
+            // Calculer et afficher le pourcentage au-dessus de la barre
+            int percentage = (item.second * 100) / barTotal;
+            QString percentageText = QString("%1%").arg(percentage);
+
+            // Dessiner le texte au-dessus de la barre
+            QPointF textPosition(barXPos + barWidth / 2, barChartHeight - barHeight - 25);
             barChartPainter.setPen(Qt::black);
-            barChartPainter.drawText(barRect.center(), item.first);  // Ajouter le texte sous chaque barre
+            barChartPainter.drawText(textPosition, percentageText);  // Dessiner le pourcentage
 
             barXPos += barWidth + gap;
             colorIndex++;
@@ -606,7 +615,75 @@ void MainWindow::on_suivie_des_absences_clicked()
 
 void MainWindow::on_notification_clicked()
 {
+
+
+        // Création du manager
+        QNetworkAccessManager* manager = new QNetworkAccessManager(this);
+
+        // Récupération des techniciens absents
+        QSqlQuery query;
+        query.prepare("SELECT nom, prenom FROM technicien WHERE absent = 'oui'");
+
+        if (!query.exec()) {
+            QMessageBox::critical(this, "Erreur",
+                "Erreur lors de la récupération des techniciens absents");
+            manager->deleteLater();
+            return;
+        }
+
+        //bool messageSent = false;
+
+        while (query.next()) {
+            QString nom = query.value(0).toString();
+            QString prenom = query.value(1).toString();
+
+            // Configuration de la requête
+            QNetworkRequest request;
+            request.setUrl(QUrl("http://api.twilio.com/2010-04-01/Accounts/" + ACCOUNT_SID + "/Messages.json"));
+
+
+            // Authentification
+            QString credentials = ACCOUNT_SID + ":" + AUTH_TOKEN;
+            QByteArray auth = "Basic " + credentials.toUtf8().toBase64();
+            request.setRawHeader("Authorization", auth);
+            request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
+
+            // Préparation du message
+            QUrlQuery postData;
+            postData.addQueryItem("From", FROM_NUMBER);
+            postData.addQueryItem("To", TO_NUMBER);
+            postData.addQueryItem("Body", QString("Bonjour %1 %2, vous êtes marqué(e) comme absent(e).")
+                                        .arg(prenom)
+                                        .arg(nom));
+
+            // Debug information
+            qDebug() << "De (Twilio):" << FROM_NUMBER;
+            qDebug() << "Vers:" << TO_NUMBER;
+            qDebug() << "Message:" << postData.toString();
+
+            // Envoi de la requête
+            QNetworkReply* reply = manager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
+
+            // Connexion des signaux pour ce reply
+
+            connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+                QByteArray response = reply->readAll();
+                if (reply->error() == QNetworkReply::NoError) {
+                    qDebug() << "Message envoyé avec succès. Réponse Twilio:" << response;
+
+                    // Log success
+                    QMessageBox::information(this, "Succès", "Notification envoyée avec succès !\nRéponse Twilio: " + response);
+                } else {
+                    qDebug() << "Erreur d'envoi:" << reply->errorString();
+                    qDebug() << "Réponse Twilio:" << response;
+
+                    // Log error
+                    QMessageBox::warning(this, "Erreur", "Échec de l'envoi de la notification:\n" + reply->errorString() + "\nRéponse Twilio: " + response);
+                }
+                reply->deleteLater();
+        });
     }
+}
 
 
 
@@ -747,6 +824,8 @@ void MainWindow::on_idTechDoc_textChanged()
     }
 }
 
+
+
 void MainWindow::on_ajouterDocument_clicked()
 {
     // Vérifier l'ID du technicien
@@ -779,8 +858,14 @@ void MainWindow::on_ajouterDocument_clicked()
     if (fileName.isEmpty())
         return;
 
-    // Générer un nouveau nom de fichier unique
+    // Vérifier si le fichier existe
     QFileInfo fileInfo(fileName);
+    if (!fileInfo.exists()) {
+        QMessageBox::warning(this, "Erreur", "Le fichier sélectionné n'existe pas.");
+        return;
+    }
+
+    // Générer un nouveau nom de fichier unique
     QString timestamp = QDateTime::currentDateTime().toString("yyyyMMddhhmmss");
     QString newFileName = QString("%1_%2_%3.%4")
                               .arg(idTech)
@@ -788,40 +873,32 @@ void MainWindow::on_ajouterDocument_clicked()
                               .arg(timestamp)
                               .arg(fileInfo.suffix());
 
-    // Copier le fichier
-    QString destination = documentPath + newFileName;
-    if (QFile::copy(fileName, destination)) {
-        // Generate a unique ID for the document
-        QSqlQuery seqQuery;
-        seqQuery.exec("SELECT documents_seq.NEXTVAL FROM DUAL");
-        if (!seqQuery.next()) {
-            QMessageBox::critical(this, "Erreur", "Impossible de générer un ID unique.");
-            QFile::remove(destination);
-            return;
-        }
-        int newId = seqQuery.value(0).toInt();
-
-        // Sauvegarder dans la base de données
-        QSqlQuery query;
-        query.prepare("INSERT INTO documents (id, tech_id, nom_fichier, type, date_ajout, chemin) "
-                      "VALUES (:id, :tech_id, :nom_fichier, :type, SYSDATE, :chemin)");
-        query.bindValue(":id", newId);
-        query.bindValue(":tech_id", idTech);
-        query.bindValue(":nom_fichier", fileInfo.fileName());
-        query.bindValue(":type", type);
-        query.bindValue(":chemin", destination);
-
-        if (query.exec()) {
-            QMessageBox::information(this, "Succès", "Document ajouté avec succès.");
-            chargerDocuments(idTech);
-        } else {
-            QMessageBox::warning(this, "Erreur", "Erreur lors de l'enregistrement: " + query.lastError().text());
-            QFile::remove(destination);
-        }
-    } else {
+    // Copier le fichier vers le dossier des documents
+    QString destination = QDir(documentPath).filePath(newFileName);
+    if (!QFile::copy(fileName, destination)) {
         QMessageBox::warning(this, "Erreur", "Erreur lors de la copie du fichier.");
+        return;
+    }
+
+    // Sauvegarder dans la base de données
+    QSqlQuery query;
+    query.prepare("INSERT INTO documents (tech_id, nom_fichier, type, date_ajout, chemin) "
+                  "VALUES (:tech_id, :nom_fichier, :type, :date_ajout, :chemin)");
+    query.bindValue(":tech_id", idTech);
+    query.bindValue(":nom_fichier", newFileName); // Save the unique file name
+    query.bindValue(":type", type);
+    query.bindValue(":date_ajout", QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"));
+    query.bindValue(":chemin", destination); // Save the full file path
+
+    if (query.exec()) {
+        QMessageBox::information(this, "Succès", "Document ajouté avec succès.");
+        chargerDocuments(idTech);
+    } else {
+        QMessageBox::warning(this, "Erreur", "Erreur lors de l'enregistrement: " + query.lastError().text());
+        QFile::remove(destination); // Rollback file copy on database failure
     }
 }
+
 
 
 void MainWindow::on_supprimerDocument_clicked()
@@ -863,6 +940,9 @@ void MainWindow::on_supprimerDocument_clicked()
         }
     }
 }
+
+
+
 void MainWindow::on_visualiserDocument_clicked()
 {
     if (!ui->documentsTable->currentItem()) {
@@ -873,13 +953,17 @@ void MainWindow::on_visualiserDocument_clicked()
     int row = ui->documentsTable->currentRow();
     QString fileName = ui->documentsTable->item(row, 0)->text();
 
-    // Ensure proper construction of the file path
-    QString filePath = QDir(documentPath).filePath(fileName);
+    // Fetch the full file path from the database
+    QSqlQuery query;
+    query.prepare("SELECT chemin FROM documents WHERE nom_fichier = :nom_fichier");
+    query.bindValue(":nom_fichier", fileName);
 
-    // Debugging logs
-    qDebug() << "documentPath:" << documentPath;
-    qDebug() << "fileName:" << fileName;
-    qDebug() << "Constructed filePath:" << filePath;
+    if (!query.exec() || !query.next()) {
+        QMessageBox::warning(this, "Erreur", "Impossible de localiser le chemin du document dans la base de données.");
+        return;
+    }
+
+    QString filePath = query.value(0).toString();
 
     // Check if the file exists
     if (!QFile::exists(filePath)) {
@@ -887,7 +971,7 @@ void MainWindow::on_visualiserDocument_clicked()
         return;
     }
 
-    // Attempt to open the file
+    // Open the file
     if (!QDesktopServices::openUrl(QUrl::fromLocalFile(filePath))) {
         QMessageBox::warning(this, "Erreur", "Impossible d'ouvrir le document. Vérifiez votre configuration système.");
     }
@@ -943,3 +1027,138 @@ void MainWindow::chargerDocuments(int idTech)
 
 
 
+
+
+void MainWindow::on_recherchenom_clicked()
+{
+    // Récupérer le nom entré par l'utilisateur
+        QString nom = ui->nomch->text().trimmed();
+
+        if (nom.isEmpty()) {
+            QMessageBox::warning(this, tr("Erreur"), tr("Veuillez entrer un nom."));
+            return;
+        }
+
+        // Préparer la requête pour la recherche
+        QSqlQuery query;
+        query.prepare("SELECT id, nom, prenom, competence, disponibilite, phoneNumber, absent, adresse FROM technicien WHERE nom = :nom");
+        query.bindValue(":nom", nom);
+
+        if (!query.exec()) {
+            QMessageBox::critical(this, tr("Erreur"), tr("Échec de la recherche: ") + query.lastError().text());
+            return;
+        }
+
+        // Configurer le modèle pour le QTableView
+        QSqlQueryModel *model = new QSqlQueryModel(this);
+        model->setQuery(query);
+
+        // Définir les en-têtes des colonnes
+        model->setHeaderData(0, Qt::Horizontal, tr("ID"));
+        model->setHeaderData(1, Qt::Horizontal, tr("Nom"));
+        model->setHeaderData(2, Qt::Horizontal, tr("Prénom"));
+        model->setHeaderData(3, Qt::Horizontal, tr("Compétence"));
+        model->setHeaderData(4, Qt::Horizontal, tr("Disponibilité"));
+        model->setHeaderData(5, Qt::Horizontal, tr("Téléphone"));
+        model->setHeaderData(6, Qt::Horizontal, tr("Absent"));
+        model->setHeaderData(7, Qt::Horizontal, tr("Adresse"));
+
+        // Appliquer le modèle au QTableView
+        ui->tableView->setModel(model);
+        ui->tableView->resizeColumnsToContents();
+
+        // Vérifier s'il y a des résultats
+        if (model->rowCount() == 0) {
+            QMessageBox::information(this, tr("Aucun résultat"), tr("Aucun technicien trouvé avec ce nom."));
+        }
+
+}
+
+void MainWindow::on_recherchecompetence_clicked()
+{
+    // Récupérer la compétence entrée par l'utilisateur
+        QString competence = ui->competencech->text().trimmed();
+
+        if (competence.isEmpty()) {
+            QMessageBox::warning(this, tr("Erreur"), tr("Veuillez entrer une compétence."));
+            return;
+        }
+
+        // Préparer la requête pour la recherche
+        QSqlQuery query;
+        query.prepare("SELECT id, nom, prenom, competence, disponibilite, phoneNumber, absent, adresse FROM technicien WHERE competence = :competence");
+        query.bindValue(":competence", competence);
+
+        if (!query.exec()) {
+            QMessageBox::critical(this, tr("Erreur"), tr("Échec de la recherche: ") + query.lastError().text());
+            return;
+        }
+
+        // Configurer le modèle pour le QTableView
+        QSqlQueryModel *model = new QSqlQueryModel(this);
+        model->setQuery(query);
+
+        // Définir les en-têtes des colonnes
+        model->setHeaderData(0, Qt::Horizontal, tr("ID"));
+        model->setHeaderData(1, Qt::Horizontal, tr("Nom"));
+        model->setHeaderData(2, Qt::Horizontal, tr("Prénom"));
+        model->setHeaderData(3, Qt::Horizontal, tr("Compétence"));
+        model->setHeaderData(4, Qt::Horizontal, tr("Disponibilité"));
+        model->setHeaderData(5, Qt::Horizontal, tr("Téléphone"));
+        model->setHeaderData(6, Qt::Horizontal, tr("Absent"));
+        model->setHeaderData(7, Qt::Horizontal, tr("Adresse"));
+
+        // Appliquer le modèle au QTableView
+        ui->tableView->setModel(model);
+        ui->tableView->resizeColumnsToContents();
+
+        // Vérifier s'il y a des résultats
+        if (model->rowCount() == 0) {
+            QMessageBox::information(this, tr("Aucun résultat"), tr("Aucun technicien trouvé avec cette compétence."));
+        }
+
+}
+
+void MainWindow::on_bilan_clicked()
+{
+    // Récupère la liste des techniciens absents à partir de la base de données
+        QList<technicien> techniciensAbsents;
+        QSqlQuery query;
+        query.prepare("SELECT * FROM technicien WHERE LOWER(absent) = 'oui'"); // Filtrer les absents
+
+        if (query.exec()) {
+            while (query.next()) {
+                technicien t;
+                t.setID(query.value("id").toInt());
+                t.setNom(query.value("nom").toString());
+                t.setPrenom(query.value("prenom").toString());
+                t.setcompetence(query.value("competence").toString());
+                t.setdisponibilite(query.value("disponibilite").toString());
+                t.setphoneNumber(query.value("phoneNumber").toString());
+                t.setabsent(query.value("absent").toString());
+                t.setadresse(query.value("adresse").toString());
+                techniciensAbsents.append(t);
+            }
+        }
+
+        if (techniciensAbsents.isEmpty()) {
+            QMessageBox::information(this, tr("Aucun technicien absent"), tr("Aucun technicien absent trouvé."));
+            return;
+        }
+
+        // Demander à l'utilisateur de choisir un emplacement pour enregistrer le fichier PDF
+        QString filePath = QFileDialog::getSaveFileName(this, tr("Enregistrer le bilan des absences"), "", "*.pdf");
+
+        if (filePath.isEmpty()) {
+            QMessageBox::warning(this, tr("Annulé"), tr("Vous n'avez pas spécifié de chemin pour le PDF."));
+            return;
+        }
+
+        // Générer le PDF
+        technicien tempTech; // Utilisation d'un objet temporaire pour appeler la méthode statique
+        if (tempTech.convertirEnPDFAbsents(filePath, techniciensAbsents)) {
+            QMessageBox::information(this, tr("Succès"), tr("Le bilan des absences a été généré avec succès."));
+        } else {
+            QMessageBox::critical(this, tr("Erreur"), tr("Échec de la génération du PDF."));
+        }
+}

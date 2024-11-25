@@ -62,6 +62,12 @@ private slots:
 
     void on_trier_absence_clicked();
 
+    void on_recherchenom_clicked();
+
+    void on_recherchecompetence_clicked();
+
+    void on_bilan_clicked();
+
 private:
     Ui::MainWindow *ui;
     technicien tech;

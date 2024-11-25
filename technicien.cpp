@@ -72,6 +72,33 @@ bool technicien::ajouter()
      t.id = -1;
      return t;
  }
+ technicien technicien::findByName(const QString& name) {
+     QSqlQuery query;
+     query.prepare("SELECT * FROM technicien WHERE nom = :name");
+     query.bindValue(":name", name);
+
+     if (query.exec()) {
+         if (query.next()) { // If technicien is found
+             technicien t;
+             t.id = query.value("id").toInt();
+             t.nom = query.value("nom").toString();
+             t.prenom = query.value("prenom").toString();
+             t.competence = query.value("competence").toString();
+             t.disponibilite = query.value("disponibilite").toString();
+             t.phoneNumber = query.value("phoneNumber").toString();
+             t.absent = query.value("absent").toString();
+             t.adresse = query.value("adresse").toString();
+
+             return t;
+         }
+     }
+
+     // If not found, return a technicien object with id set to -1 to indicate not found
+     technicien t;
+     t.id = -1;
+     return t;
+ }
+
 
  bool technicien::mettreAJour(int newId) {
      QSqlQuery q;
@@ -94,6 +121,32 @@ bool technicien::ajouter()
      } else {
          return false;
      }
+ }
+ technicien technicien::findByCompetence(const QString& competence) {
+     QSqlQuery query;
+     query.prepare("SELECT * FROM technicien WHERE competence = :competence");
+     query.bindValue(":competence", competence);
+
+     if (query.exec()) {
+         if (query.next()) { // If technicien is found
+             technicien t;
+             t.id = query.value("id").toInt();
+             t.nom = query.value("nom").toString();
+             t.prenom = query.value("prenom").toString();
+             t.competence = query.value("competence").toString();
+             t.disponibilite = query.value("disponibilite").toString();
+             t.phoneNumber = query.value("phoneNumber").toString();
+             t.absent = query.value("absent").toString();
+             t.adresse = query.value("adresse").toString();
+
+             return t;
+         }
+     }
+
+     // If not found, return a technicien object with id set to -1 to indicate not found
+     technicien t;
+     t.id = -1;
+     return t;
  }
 
 
@@ -125,15 +178,91 @@ bool technicien::ajouter()
      painter.drawText(100, 300, QObject::tr("Prénom: %1").arg(getPrenom()));
      painter.drawText(100, 350, QObject::tr("Compétence: %1").arg(getcompetence()));
      painter.drawText(100, 400, QObject::tr("Disponibilité: %1").arg(getdisponibilite()));
-     painter.drawText(100, 350, QObject::tr("phoneNumber: %1").arg(getphoneNumber()));
-     painter.drawText(100, 400, QObject::tr("absent: %1").arg(getabsent()));
-     painter.drawText(100, 400, QObject::tr("adresse: %1").arg(getadresse()));
+     painter.drawText(100, 450, QObject::tr("phoneNumber: %1").arg(getphoneNumber()));
+     painter.drawText(100, 500, QObject::tr("absent: %1").arg(getabsent()));
+     painter.drawText(100, 550, QObject::tr("adresse: %1").arg(getadresse()));
 
      // End the painter to finalize the PDF
      painter.end();
 
      return true;  // Return true if successful
  }
+
+
+
+
+ bool technicien::convertirEnPDFAbsents(const QString &filePath, const QList<technicien> &techniciensAbsents) {
+     // Create a QPdfWriter with the specified file path
+     QPdfWriter pdfWriter(filePath);
+     pdfWriter.setPageSize(QPageSize(QPageSize::A4));    // Set page size
+     pdfWriter.setResolution(300);                       // Set resolution (DPI)
+     pdfWriter.setTitle("Bilan des Absences");
+
+     // Create a QPainter to draw on the PDF
+     QPainter painter(&pdfWriter);
+
+     if (!painter.isActive()) {
+         return false; // Return false if the painter failed to activate
+     }
+
+     // Set fonts and basic styles
+     QFont titleFont("Arial", 20, QFont::Bold);
+     QFont headerFont("Arial", 14, QFont::Bold);
+     QFont contentFont("Arial", 12);
+
+     // Title - Centered in red
+     painter.setFont(titleFont);
+     painter.setPen(Qt::red);
+     QRect titleRect(0, 50, pdfWriter.width(), 100);
+     painter.drawText(titleRect, Qt::AlignCenter, QObject::tr("Bilan des Absences"));
+
+     // Move down for the content
+     painter.setPen(Qt::black);
+     painter.setFont(headerFont);
+     int yPosition = 250;  // Starting position for the table
+
+     // Table headers with better spacing
+     int columnX[] = {100, 300, 500, 800, 1300, 1700};  // X positions for each column
+     painter.drawText(columnX[0], yPosition, QObject::tr("ID"));
+     painter.drawText(columnX[1], yPosition, QObject::tr("Nom"));
+     painter.drawText(columnX[2], yPosition, QObject::tr("Prénom"));
+     painter.drawText(columnX[3], yPosition, QObject::tr("Compétence"));
+     painter.drawText(columnX[4], yPosition, QObject::tr("Téléphone"));
+     painter.drawText(columnX[5], yPosition, QObject::tr("Adresse"));
+
+     // Draw a line under the headers
+     yPosition += 20;
+     painter.drawLine(100, yPosition, pdfWriter.width() - 100, yPosition);
+
+     // Set content font
+     painter.setFont(contentFont);
+     yPosition += 250;  // Start content after header
+
+     // Populate rows with absent technicians
+     for (const technicien &t : techniciensAbsents) {
+         if (t.getabsent().toLower() == "oui") { // Check if the technician is absent
+             painter.drawText(columnX[0], yPosition, QString::number(t.getID()));
+             painter.drawText(columnX[1], yPosition, t.getNom());
+             painter.drawText(columnX[2], yPosition, t.getPrenom());
+             painter.drawText(columnX[3], yPosition, t.getcompetence());
+             painter.drawText(columnX[4], yPosition, t.getphoneNumber());
+             painter.drawText(columnX[5], yPosition, t.getadresse());
+             yPosition += 60;  // Increase the yPosition for the next row
+
+             // Handle page break if reaching the end of the page
+             if (yPosition > pdfWriter.height() - 100) {
+                 pdfWriter.newPage();
+                 yPosition = 100; // Reset y position for the new page
+             }
+         }
+     }
+
+     // End the painter to finalize the PDF
+     painter.end();
+
+     return true;  // Return true if successful
+ }
+
 
 
  QSqlQueryModel* technicien::trier(const QString& critere, const QString& ordre) {
@@ -149,6 +278,7 @@ bool technicien::ajouter()
 
      return model;
  }
+
 
 
  QSqlQueryModel* technicien::getAbsentTechniciens() {
